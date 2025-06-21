@@ -1,0 +1,105 @@
+import numpy as np
+import math
+from data_loader import read_data
+
+class Node:
+    def __init__(self, attribute):
+        self.attribute = attribute
+        self.children = []
+        self.answer = ""
+
+    def __str__(self):
+        return self.attribute
+
+def subtables(data, col, delete):
+    dict = {}
+    items = np.unique(data[:, col])
+    count = np.zeros((items.shape[0], 1), dtype=np.int32)
+
+    for x in range(items.shape[0]):
+        for y in range(data.shape[0]):
+            if data[y, col] == items[x]:
+                count[x] += 1
+
+    for x in range(items.shape[0]):
+        dict[items[x]] = np.empty((int(count[x]), data.shape[1]), dtype="|S32")
+
+    count_dict = {item: 0 for item in items}
+
+    for y in range(data.shape[0]):
+        item = data[y, col]
+        dict[item][count_dict[item]] = data[y]
+        count_dict[item] += 1
+
+    if delete:
+        for item in items:
+            dict[item] = np.delete(dict[item], col, 1)
+
+    return items, dict
+
+def entropy(S):
+    items = np.unique(S)
+    if items.size == 1:
+        return 0
+    counts = np.zeros((items.shape[0], 1))
+    for x in range(items.shape[0]):
+        counts[x] = sum(S == items[x]) / float(S.size)
+    return sum([-count * math.log2(count) for count in counts if count != 0])
+
+def gain_ratio(data, col):
+    items, dicts = subtables(data, col, delete=False)
+    total_size = data.shape[0]
+    entropies = 0
+    intrinsic = 0
+
+    for x in items:
+        subset = dicts[x]
+        ratio = subset.shape[0] / float(total_size)
+        entropies += ratio * entropy(subset[:, -1])
+        intrinsic += -ratio * math.log2(ratio) if ratio != 0 else 0
+
+    total_entropy = entropy(data[:, -1])
+    info_gain = total_entropy - entropies
+    return info_gain / intrinsic if intrinsic != 0 else 0
+
+def create_node(data, metadata):
+    if np.unique(data[:, -1]).shape[0] == 1:
+        node = Node("")
+        node.answer = data[0, -1].decode() if isinstance(data[0, -1], bytes) else data[0, -1]
+        return node
+
+    gains = np.zeros((data.shape[1] - 1, 1))
+    for col in range(data.shape[1] - 1):
+        gains[col] = gain_ratio(data, col)
+
+    split = np.argmax(gains)
+    split_attr = metadata[split]
+    node = Node(split_attr)
+    metadata = np.delete(metadata, split, 0)
+
+    items, dicts = subtables(data, split, delete=True)
+
+    for x in items:
+        child = create_node(dicts[x], metadata)
+        node.children.append((x.decode() if isinstance(x, bytes) else x, child))
+
+    return node
+
+def empty(size):
+    return " " * size
+
+def print_tree(node, level):
+    if node.answer != "":
+        print(empty(level), "=>", node.answer)
+        return
+
+    print(empty(level), node.attribute)
+    for value, child in node.children:
+        print(empty(level + 1), "[{}]".format(value))
+        print_tree(child, level + 2)
+
+# Main logic
+metadata, traindata = read_data("tennis.csv")
+data = np.array(traindata, dtype='|S32')  # Ensure uniform data type for numpy
+node = create_node(data, metadata)
+print_tree(node, 0)
